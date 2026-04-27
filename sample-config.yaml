@@ -1,0 +1,29 @@
+# Redpen Configuration Sample
+# Copy this to config.yaml and fill in your details
+
+# GitHub PAT (can also be set via REDPEN_TOKEN or GITHUB_TOKEN env var)
+token: "ghp_xxxxxxxxxxxx"
+
+# Repository to fetch from (owner/repo)
+repo: "owner/repo"
+
+# Default output directory
+out: "./pr-reviews"
+
+# Number of parallel PR fetches
+parallelism: 4
+
+# PR state to fetch (open, closed, all)
+state: "all"
+
+# Log level (debug, info, warn, error)
+log-level: "info"
+
+# Filter by PR author (comma-separated list)
+# pr-author: "user1,user2"
+
+# Filter comments by reviewer (comma-separated list)
+# comment-filter: "reviewer1,reviewer2"
+
+# Max PRs to process (0 = no limit)
+# limit: 10
