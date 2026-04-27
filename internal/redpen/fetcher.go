@@ -27,13 +27,13 @@ func ListPRs(c *GhClient, owner, repo, state string, authors map[string]bool) ([
 // rawSearchPR maps the GitHub Search API PR item, which buries merged_at inside
 // a pull_request sub-object instead of exposing it at the top level.
 type rawSearchPR struct {
-	Number    int       `json:"number"`
-	Title     string    `json:"title"`
-	State     string    `json:"state"`
-	HTMLURL   string    `json:"html_url"`
-	User      GhUser    `json:"user"`
-	CreatedAt time.Time `json:"created_at"`
-	UpdatedAt time.Time `json:"updated_at"`
+	Number      int       `json:"number"`
+	Title       string    `json:"title"`
+	State       string    `json:"state"`
+	HTMLURL     string    `json:"html_url"`
+	User        GhUser    `json:"user"`
+	CreatedAt   time.Time `json:"created_at"`
+	UpdatedAt   time.Time `json:"updated_at"`
 	PullRequest struct {
 		MergedAt *time.Time `json:"merged_at"`
 	} `json:"pull_request"`
@@ -173,7 +173,7 @@ func toReviewComment(r RawReviewComment) ReviewComment {
 }
 
 func toReview(r RawReview) (Review, bool) {
-	if r.Body == "" && r.State == "COMMENTED" {
+	if r.Body == "" {
 		return Review{}, false
 	}
 	return Review{
