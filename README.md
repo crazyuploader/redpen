@@ -36,20 +36,20 @@ redpen fetch --repo owner/repo --limit 50
 
 ## Flags
 
-| Flag | Default | Description |
-|---|---|---|
-| `--repo` | required | `owner/repo` |
-| `--token` | `$GITHUB_TOKEN` | GitHub PAT |
-| `--pr-author` | all | PR author logins, comma-separated |
-| `--comment-filter` | all | Keep comments from these reviewer logins only |
-| `--reviewer-type` | all | Keep comments by type: `user`, `bot`, `organization` |
-| `--skip-empty` | false | Drop PRs with zero matching comments after filtering |
-| `--state` | `all` | `open`, `closed`, `all` |
-| `--out` | `./pr-reviews` | Output directory |
-| `--limit` | `0` (unlimited) | Max PRs to process |
-| `--parallelism` | `4` | Concurrent PR fetches |
-| `--force` | false | Ignore cache |
-| `--log-level` | `info` | `debug`, `info`, `warn`, `error` |
+| Flag               | Default         | Description                                          |
+| ------------------ | --------------- | ---------------------------------------------------- |
+| `--repo`           | required        | `owner/repo`                                         |
+| `--token`          | `$GITHUB_TOKEN` | GitHub PAT                                           |
+| `--pr-author`      | all             | PR author logins, comma-separated                    |
+| `--comment-filter` | all             | Keep comments from these reviewer logins only        |
+| `--reviewer-type`  | all             | Keep comments by type: `user`, `bot`, `organization` |
+| `--skip-empty`     | false           | Drop PRs with zero matching comments after filtering |
+| `--state`          | `all`           | `open`, `closed`, `all`                              |
+| `--out`            | `./pr-reviews`  | Output directory                                     |
+| `--limit`          | `0` (unlimited) | Max PRs to process                                   |
+| `--parallelism`    | `4`             | Concurrent PR fetches                                |
+| `--force`          | false           | Ignore cache                                         |
+| `--log-level`      | `info`          | `debug`, `info`, `warn`, `error`                     |
 
 ## Config file
 
