@@ -1,19 +1,24 @@
 package main
 
 import (
+	"context"
 	"encoding/json"
 	"fmt"
-	"log"
 	"os"
+	"os/signal"
 	"path/filepath"
 	"sort"
 	"strconv"
 	"strings"
 	"sync"
+	"syscall"
 	"time"
 
+	"github.com/rs/zerolog/log"
 	"github.com/spf13/cobra"
 	"github.com/spf13/viper"
+	"golang.org/x/sync/errgroup"
+
 	"github.com/crazyuploader/redpen/internal/redpen"
 )
 
@@ -50,107 +55,110 @@ var fetchCmd = &cobra.Command{
 		prAuthorFilter := redpen.SplitSet(prAuthor)
 		commentFilter := redpen.SplitSet(commentFilterStr)
 
+		// Log available rate limit budget before any API calls.
+		if rl, err := redpen.FetchRateLimit(client); err != nil {
+			log.Warn().Err(err).Msg("could not fetch rate limit info")
+		} else {
+			log.Info().
+				Int("core_remaining", rl.Core.Remaining).
+				Int("core_limit", rl.Core.Limit).
+				Int("search_remaining", rl.Search.Remaining).
+				Int("search_limit", rl.Search.Limit).
+				Time("core_reset", time.Unix(rl.Core.Reset, 0)).
+				Msg("GitHub API rate limit")
+		}
+
 		state := redpen.LoadState(statePath)
 		if force {
-			log.Printf("--force: ignoring cached state, re-fetching all PRs")
+			log.Info().Msg("--force: ignoring cache, re-fetching all PRs")
 			state = redpen.State{PRs: make(map[string]redpen.PRStateEntry)}
 		}
 
-		log.Printf("listing PRs in %s/%s (state=%s)...", owner, repoName, stateStr)
-		allPRs, err := redpen.ListPRs(client, owner, repoName, stateStr)
+		// When pr-author is set, the Search API fetches only that author's PRs
+		// directly — no full repo enumeration required.
+		log.Info().
+			Str("repo", fmt.Sprintf("%s/%s", owner, repoName)).
+			Str("state", stateStr).
+			Strs("authors", mapKeys(prAuthorFilter)).
+			Msg("listing PRs")
+
+		allPRs, err := redpen.ListPRs(client, owner, repoName, stateStr, prAuthorFilter)
 		if err != nil {
 			return fmt.Errorf("failed to list PRs: %w", err)
 		}
-		log.Printf("found %d PRs total", len(allPRs))
-
-		if len(prAuthorFilter) > 0 {
-			filtered := allPRs[:0]
-			for _, p := range allPRs {
-				if prAuthorFilter[p.User.Login] {
-					filtered = append(filtered, p)
-				}
-			}
-			allPRs = filtered
-			log.Printf("after author filter (%s): %d PRs", prAuthor, len(allPRs))
-		}
+		log.Info().Int("count", len(allPRs)).Msg("PRs found")
 
 		if limit > 0 && len(allPRs) > limit {
 			allPRs = allPRs[:limit]
-			log.Printf("limiting to %d PRs", limit)
+			log.Info().Int("limit", limit).Msg("capped PR list")
 		}
 
-		// Parallel fetch
-		var prDataList []redpen.PRData
-		var mu sync.Mutex
-		
-		// Use a semaphore to limit parallelism
-		sem := make(chan struct{}, parallelism)
-		var wg sync.WaitGroup
+		ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
+		defer stop()
+
+		var (
+			mu         sync.Mutex
+			prDataList []redpen.PRData
+		)
+
+		g, ctx := errgroup.WithContext(ctx)
+		g.SetLimit(parallelism)
 
 		for i, p := range allPRs {
-			wg.Add(1)
-			go func(i int, p redpen.RawPR) {
-				defer wg.Done()
-				sem <- struct{}{}
-				defer func() { <-sem }()
+			g.Go(func() error {
+				select {
+				case <-ctx.Done():
+					return nil
+				default:
+				}
 
 				key := strconv.Itoa(p.Number)
-				prefix := fmt.Sprintf("[%d/%d] PR #%d", i+1, len(allPRs), p.Number)
+				prLog := log.With().Int("pr", p.Number).Int("n", i+1).Int("total", len(allPRs)).Logger()
 
 				cached, hasCached := redpen.LoadPRCache(outDir, p.Number)
-				
+
 				mu.Lock()
 				stateEntry, inState := state.PRs[key]
 				mu.Unlock()
 
-				needsFetch := true
-				if !force && hasCached && inState {
-					if !p.UpdatedAt.After(stateEntry.UpdatedAt) {
-						log.Printf("%s: using cache (not updated since %s)",
-							prefix, stateEntry.FetchedAt.Format("2006-01-02 15:04"))
-						
-						mu.Lock()
-						prDataList = append(prDataList, cached)
-						mu.Unlock()
-						
-						needsFetch = false
-					}
-				}
-
-				if needsFetch {
-					log.Printf("%s: fetching — %s", prefix, p.Title)
-					pd, err := redpen.FetchPRData(client, owner, repoName, p)
-					if err != nil {
-						log.Printf("%s: fetch error: %v — skipping", prefix, err)
-						return
-					}
-					if err := redpen.SavePRCache(outDir, pd); err != nil {
-						log.Printf("%s: cache write error: %v", prefix, err)
-					}
-					
+				if !force && hasCached && inState && !p.UpdatedAt.After(stateEntry.UpdatedAt) {
+					prLog.Debug().Time("cached_at", stateEntry.FetchedAt).Msg("cache hit")
 					mu.Lock()
-					state.PRs[key] = redpen.PRStateEntry{
-						FetchedAt: time.Now().UTC(),
-						UpdatedAt: p.UpdatedAt,
-					}
-					prDataList = append(prDataList, pd)
+					prDataList = append(prDataList, cached)
 					mu.Unlock()
-					
-					// Be polite between PR fetches if not too many workers
-					if parallelism <= 2 {
-						time.Sleep(250 * time.Millisecond)
-					}
+					return nil
 				}
-			}(i, p)
-		}
-		wg.Wait()
 
-		// Sort for deterministic output
+				prLog.Info().Str("title", p.Title).Msg("fetching")
+				pd, err := redpen.FetchPRData(client, owner, repoName, p)
+				if err != nil {
+					prLog.Error().Err(err).Msg("fetch failed, skipping")
+					return nil
+				}
+				if err := redpen.SavePRCache(outDir, pd); err != nil {
+					prLog.Warn().Err(err).Msg("cache write failed")
+				}
+
+				mu.Lock()
+				state.PRs[key] = redpen.PRStateEntry{
+					FetchedAt: time.Now().UTC(),
+					UpdatedAt: p.UpdatedAt,
+				}
+				prDataList = append(prDataList, pd)
+				mu.Unlock()
+
+				return nil
+			})
+		}
+
+		if err := g.Wait(); err != nil {
+			return fmt.Errorf("fetch workers: %w", err)
+		}
+
 		sort.Slice(prDataList, func(i, j int) bool {
 			return prDataList[i].Number < prDataList[j].Number
 		})
 
-		// Build output
 		output := redpen.Output{
 			Repo:        repo,
 			GeneratedAt: time.Now().UTC(),
@@ -169,7 +177,6 @@ var fetchCmd = &cobra.Command{
 		}
 		output.Stats.TotalPRs = len(output.PullRequests)
 
-		// Write JSON
 		jsonPath := filepath.Join(outDir, "comments.json")
 		jsonBytes, err := json.MarshalIndent(output, "", "  ")
 		if err != nil {
@@ -178,49 +185,56 @@ var fetchCmd = &cobra.Command{
 		if err := os.WriteFile(jsonPath, jsonBytes, 0o644); err != nil {
 			return fmt.Errorf("write JSON: %w", err)
 		}
-		log.Printf("✓ JSON  → %s", jsonPath)
+		log.Info().Str("path", jsonPath).Msg("JSON written")
 
-		// Write Markdown
 		mdPath := filepath.Join(outDir, "dont-do-list.md")
 		if err := os.WriteFile(mdPath, []byte(redpen.GenerateMarkdown(output)), 0o644); err != nil {
 			return fmt.Errorf("write markdown: %w", err)
 		}
-		log.Printf("✓ MD    → %s", mdPath)
+		log.Info().Str("path", mdPath).Msg("markdown written")
 
-		// Save state
 		state.LastRun = time.Now().UTC()
 		if err := redpen.SaveState(statePath, state); err != nil {
-			log.Printf("⚠ failed to save state: %v", err)
+			log.Warn().Err(err).Msg("failed to save state")
+		} else {
+			log.Info().Str("path", statePath).Msg("state saved")
 		}
-		log.Printf("✓ state → %s", statePath)
 
-		log.Printf("done: %d PRs | %d inline comments | %d reviews | %d discussion comments",
-			output.Stats.TotalPRs,
-			output.Stats.TotalReviewComments,
-			output.Stats.TotalReviews,
-			output.Stats.TotalIssueComments,
-		)
+		log.Info().
+			Int("prs", output.Stats.TotalPRs).
+			Int("inline_comments", output.Stats.TotalReviewComments).
+			Int("reviews", output.Stats.TotalReviews).
+			Int("discussion_comments", output.Stats.TotalIssueComments).
+			Msg("done")
 
 		return nil
 	},
 }
 
+func mapKeys(m map[string]bool) []string {
+	keys := make([]string, 0, len(m))
+	for k := range m {
+		keys = append(keys, k)
+	}
+	return keys
+}
+
 func init() {
 	fetchCmd.Flags().String("token", os.Getenv("GITHUB_TOKEN"), "GitHub token")
 	fetchCmd.Flags().String("repo", "", "GitHub repository (owner/repo)")
-	fetchCmd.Flags().String("pr-author", "", "Filter by PR author")
-	fetchCmd.Flags().String("comment-filter", "", "Filter comments by reviewer")
+	fetchCmd.Flags().String("pr-author", "", "Filter by PR author (comma-separated)")
+	fetchCmd.Flags().String("comment-filter", "", "Filter comments by reviewer (comma-separated)")
 	fetchCmd.Flags().String("state", "all", "PR state (open, closed, all)")
 	fetchCmd.Flags().String("out", "./pr-reviews", "Output directory")
-	fetchCmd.Flags().Int("limit", 0, "Limit number of PRs to fetch")
+	fetchCmd.Flags().Int("limit", 0, "Limit number of PRs to fetch (0 = unlimited)")
 
-	viper.BindPFlag("token", fetchCmd.Flags().Lookup("token"))
-	viper.BindPFlag("repo", fetchCmd.Flags().Lookup("repo"))
-	viper.BindPFlag("pr-author", fetchCmd.Flags().Lookup("pr-author"))
-	viper.BindPFlag("comment-filter", fetchCmd.Flags().Lookup("comment-filter"))
-	viper.BindPFlag("state", fetchCmd.Flags().Lookup("state"))
-	viper.BindPFlag("out", fetchCmd.Flags().Lookup("out"))
-	viper.BindPFlag("limit", fetchCmd.Flags().Lookup("limit"))
+	mustBindPFlag("token", fetchCmd.Flags().Lookup("token"))
+	mustBindPFlag("repo", fetchCmd.Flags().Lookup("repo"))
+	mustBindPFlag("pr-author", fetchCmd.Flags().Lookup("pr-author"))
+	mustBindPFlag("comment-filter", fetchCmd.Flags().Lookup("comment-filter"))
+	mustBindPFlag("state", fetchCmd.Flags().Lookup("state"))
+	mustBindPFlag("out", fetchCmd.Flags().Lookup("out"))
+	mustBindPFlag("limit", fetchCmd.Flags().Lookup("limit"))
 
 	rootCmd.AddCommand(fetchCmd)
 }

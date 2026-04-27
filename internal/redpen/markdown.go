@@ -29,7 +29,7 @@ func GenerateMarkdown(output Output) string {
 	var b strings.Builder
 
 	w := func(s string) { b.WriteString(s) }
-	wf := func(f string, args ...any) { b.WriteString(fmt.Sprintf(f, args...)) }
+	wf := func(f string, args ...any) { fmt.Fprintf(&b, f, args...) }
 
 	w("# PR Review Comments\n\n")
 	wf("**Repo:** `%s`  \n", output.Repo)

@@ -39,3 +39,7 @@ pr-reviews
 
 # Config
 config.yaml
+*.local.yaml
+
+# Air dev server
+.air/

@@ -1,13 +1,14 @@
-// cmd/redpen/root.go
 package main
 
 import (
 	"fmt"
-	"log/slog"
 	"os"
 	"strings"
 
+	"github.com/rs/zerolog"
+	"github.com/rs/zerolog/log"
 	"github.com/spf13/cobra"
+	"github.com/spf13/pflag"
 	"github.com/spf13/viper"
 )
 
@@ -38,9 +39,15 @@ func init() {
 	rootCmd.PersistentFlags().Int("parallelism", 4, "number of parallel PR fetches")
 	rootCmd.PersistentFlags().Bool("force", false, "ignore cache and re-fetch everything")
 
-	viper.BindPFlag("log-level", rootCmd.PersistentFlags().Lookup("log-level"))
-	viper.BindPFlag("parallelism", rootCmd.PersistentFlags().Lookup("parallelism"))
-	viper.BindPFlag("force", rootCmd.PersistentFlags().Lookup("force"))
+	mustBindPFlag("log-level", rootCmd.PersistentFlags().Lookup("log-level"))
+	mustBindPFlag("parallelism", rootCmd.PersistentFlags().Lookup("parallelism"))
+	mustBindPFlag("force", rootCmd.PersistentFlags().Lookup("force"))
+}
+
+func mustBindPFlag(key string, flag *pflag.Flag) {
+	if err := viper.BindPFlag(key, flag); err != nil {
+		panic(fmt.Sprintf("viper.BindPFlag(%q): %v", key, err))
+	}
 }
 
 func initConfig() error {
@@ -62,16 +69,19 @@ func initConfig() error {
 		}
 	}
 
-	level := slog.LevelInfo
+	level := zerolog.InfoLevel
 	switch strings.ToLower(viper.GetString("log-level")) {
 	case "debug":
-		level = slog.LevelDebug
+		level = zerolog.DebugLevel
 	case "warn":
-		level = slog.LevelWarn
+		level = zerolog.WarnLevel
 	case "error":
-		level = slog.LevelError
+		level = zerolog.ErrorLevel
 	}
-	slog.SetDefault(slog.New(slog.NewTextHandler(os.Stderr, &slog.HandlerOptions{Level: level})))
+	zerolog.SetGlobalLevel(level)
+	log.Logger = zerolog.New(
+		zerolog.ConsoleWriter{Out: os.Stderr, TimeFormat: "15:04:05"},
+	).With().Timestamp().Logger()
 
 	return nil
 }

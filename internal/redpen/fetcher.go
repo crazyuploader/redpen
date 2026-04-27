@@ -3,19 +3,115 @@ package redpen
 import (
 	"encoding/json"
 	"fmt"
-	"log"
 	"os"
 	"path/filepath"
 	"regexp"
 	"strings"
 	"time"
+
+	"github.com/rs/zerolog/log"
 )
 
-// ListPRs fetches all PRs for a repository.
-func ListPRs(c *GhClient, owner, repo, state string) ([]RawPR, error) {
+// ListPRs fetches PRs for a repository. When authors is non-empty it uses the
+// GitHub Search API to avoid enumerating all PRs in the repo — the old approach
+// that triggered rate limits when the repo had thousands of PRs.
+func ListPRs(c *GhClient, owner, repo, state string, authors map[string]bool) ([]RawPR, error) {
+	if len(authors) > 0 {
+		return searchPRsByAuthors(c, owner, repo, state, authors)
+	}
 	url := fmt.Sprintf("%s/repos/%s/%s/pulls?state=%s&per_page=100&sort=updated&direction=desc",
 		apiBase, owner, repo, state)
 	return FetchAll[RawPR](c, url)
+}
+
+// rawSearchPR maps the GitHub Search API PR item, which buries merged_at inside
+// a pull_request sub-object instead of exposing it at the top level.
+type rawSearchPR struct {
+	Number    int       `json:"number"`
+	Title     string    `json:"title"`
+	State     string    `json:"state"`
+	HTMLURL   string    `json:"html_url"`
+	User      GhUser    `json:"user"`
+	CreatedAt time.Time `json:"created_at"`
+	UpdatedAt time.Time `json:"updated_at"`
+	PullRequest struct {
+		MergedAt *time.Time `json:"merged_at"`
+	} `json:"pull_request"`
+}
+
+func (s rawSearchPR) toRawPR() RawPR {
+	return RawPR{
+		Number:    s.Number,
+		Title:     s.Title,
+		State:     s.State,
+		HTMLURL:   s.HTMLURL,
+		User:      s.User,
+		CreatedAt: s.CreatedAt,
+		UpdatedAt: s.UpdatedAt,
+		MergedAt:  s.PullRequest.MergedAt,
+	}
+}
+
+type searchEnvelope struct {
+	TotalCount int           `json:"total_count"`
+	Items      []rawSearchPR `json:"items"`
+}
+
+// searchPRsByAuthors issues one Search API query per author and merges results.
+// The Search API targets only the specified authors — no full repo enumeration needed.
+func searchPRsByAuthors(c *GhClient, owner, repo, state string, authors map[string]bool) ([]RawPR, error) {
+	stateFilter := ""
+	switch state {
+	case "open":
+		stateFilter = "+is:open"
+	case "closed":
+		stateFilter = "+is:closed"
+	}
+
+	seen := make(map[int]bool)
+	var all []RawPR
+
+	for author := range authors {
+		q := fmt.Sprintf("is:pr+repo:%s/%s+author:%s%s", owner, repo, author, stateFilter)
+		url := fmt.Sprintf("%s/search/issues?q=%s&per_page=100&sort=updated&order=desc", apiBase, q)
+
+		prs, err := fetchSearchPages(c, url)
+		if err != nil {
+			return nil, fmt.Errorf("search PRs for %s: %w", author, err)
+		}
+		log.Info().Str("author", author).Int("count", len(prs)).Msg("search API found PRs")
+
+		for _, pr := range prs {
+			if !seen[pr.Number] {
+				seen[pr.Number] = true
+				all = append(all, pr)
+			}
+		}
+	}
+	return all, nil
+}
+
+func fetchSearchPages(c *GhClient, initialURL string) ([]RawPR, error) {
+	var all []RawPR
+	url := initialURL
+	for url != "" {
+		b, link, err := c.get(url)
+		if err != nil {
+			return nil, err
+		}
+		var page searchEnvelope
+		if err := json.Unmarshal(b, &page); err != nil {
+			return nil, fmt.Errorf("unmarshal search %s: %w (body: %.200s)", url, err, b)
+		}
+		for _, item := range page.Items {
+			all = append(all, item.toRawPR())
+		}
+		url = nextURL(link)
+		if url != "" {
+			time.Sleep(80 * time.Millisecond)
+		}
+	}
+	return all, nil
 }
 
 func listReviewComments(c *GhClient, owner, repo string, prNum int) ([]RawReviewComment, error) {
@@ -33,7 +129,6 @@ func listIssueComments(c *GhClient, owner, repo string, prNum int) ([]RawIssueCo
 	return FetchAll[RawIssueComment](c, url)
 }
 
-// suggestionRe matches ```suggestion ... ``` blocks (GitHub's inline suggestion syntax).
 var suggestionRe = regexp.MustCompile("(?s)```suggestion[^\n]*\n(.*?)\n```")
 
 func extractSuggestions(body string) (suggestions []Suggestion, cleanBody string) {
@@ -44,8 +139,7 @@ func extractSuggestions(body string) (suggestions []Suggestion, cleanBody string
 	for _, m := range matches {
 		suggestions = append(suggestions, Suggestion{Text: strings.TrimRight(m[1], "\r\n")})
 	}
-	cleaned := suggestionRe.ReplaceAllString(body, "")
-	cleanBody = strings.TrimSpace(cleaned)
+	cleanBody = strings.TrimSpace(suggestionRe.ReplaceAllString(body, ""))
 	return suggestions, cleanBody
 }
 
@@ -79,7 +173,6 @@ func toReviewComment(r RawReviewComment) ReviewComment {
 }
 
 func toReview(r RawReview) (Review, bool) {
-	// Skip empty COMMENTED reviews — they're just containers for inline comments
 	if r.Body == "" && r.State == "COMMENTED" {
 		return Review{}, false
 	}
@@ -124,7 +217,7 @@ func FetchPRData(c *GhClient, owner, repo string, pr RawPR) (PRData, error) {
 
 	rawComments, err := listReviewComments(c, owner, repo, pr.Number)
 	if err != nil {
-		log.Printf("  ⚠  PR #%d review comments: %v", pr.Number, err)
+		log.Warn().Err(err).Int("pr", pr.Number).Msg("review comments fetch failed")
 	}
 	for _, rc := range rawComments {
 		data.ReviewComments = append(data.ReviewComments, toReviewComment(rc))
@@ -132,7 +225,7 @@ func FetchPRData(c *GhClient, owner, repo string, pr RawPR) (PRData, error) {
 
 	rawReviews, err := listReviews(c, owner, repo, pr.Number)
 	if err != nil {
-		log.Printf("  ⚠  PR #%d reviews: %v", pr.Number, err)
+		log.Warn().Err(err).Int("pr", pr.Number).Msg("reviews fetch failed")
 	}
 	for _, r := range rawReviews {
 		if rv, ok := toReview(r); ok {
@@ -142,7 +235,7 @@ func FetchPRData(c *GhClient, owner, repo string, pr RawPR) (PRData, error) {
 
 	rawIssue, err := listIssueComments(c, owner, repo, pr.Number)
 	if err != nil {
-		log.Printf("  ⚠  PR #%d issue comments: %v", pr.Number, err)
+		log.Warn().Err(err).Int("pr", pr.Number).Msg("issue comments fetch failed")
 	}
 	for _, ic := range rawIssue {
 		data.IssueComments = append(data.IssueComments, toIssueComment(ic))
@@ -189,8 +282,6 @@ func ApplyCommentFilter(pr PRData, commentFilter map[string]bool) PRData {
 	return filtered
 }
 
-// Idempotency and Cache helpers
-
 func LoadState(path string) State {
 	s := State{PRs: make(map[string]PRStateEntry)}
 	data, err := os.ReadFile(path)
@@ -198,7 +289,7 @@ func LoadState(path string) State {
 		return s
 	}
 	if err := json.Unmarshal(data, &s); err != nil {
-		log.Printf("Warning: could not parse state file %s: %v — starting fresh", path, err)
+		log.Warn().Err(err).Str("path", path).Msg("state file corrupt, starting fresh")
 		return State{PRs: make(map[string]PRStateEntry)}
 	}
 	return s

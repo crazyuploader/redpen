@@ -1,0 +1,22 @@
+root = "."
+tmp_dir = ".air"
+
+[build]
+  cmd = "go build -o .air/redpen ./cmd/redpen"
+  bin = ".air/redpen"
+  full_bin = ".air/redpen fetch"
+  include_ext = ["go"]
+  exclude_dir  = [".air", "pr-reviews", "vendor"]
+  delay = 500
+  kill_delay = "1s"
+  rerun = false
+  log = ".air/build.log"
+
+[log]
+  time = true
+
+[color]
+  app = "cyan"
+  build = "yellow"
+  runner = "green"
+  watcher = "magenta"
