@@ -133,8 +133,10 @@ type PRData struct {
 
 // OutputConfig records what filters were active when output was generated.
 type OutputConfig struct {
-	PRAuthorFilter string `json:"pr_author_filter"`
-	CommentFilter  string `json:"comment_filter"`
+	PRAuthorFilter     string `json:"pr_author_filter"`
+	CommentFilter      string `json:"comment_filter"`
+	ReviewerTypeFilter string `json:"reviewer_type_filter,omitempty"`
+	SkipEmpty          bool   `json:"skip_empty,omitempty"`
 }
 
 // OutputStats is a summary count.

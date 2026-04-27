@@ -30,6 +30,8 @@ var fetchCmd = &cobra.Command{
 		repo := viper.GetString("repo")
 		prAuthor := viper.GetString("pr-author")
 		commentFilterStr := viper.GetString("comment-filter")
+		reviewerTypeStr := viper.GetString("reviewer-type")
+		skipEmpty := viper.GetBool("skip-empty")
 		stateStr := viper.GetString("state")
 		outDir := viper.GetString("out")
 		limit := viper.GetInt("limit")
@@ -53,7 +55,10 @@ var fetchCmd = &cobra.Command{
 		statePath := filepath.Join(outDir, ".state.json")
 		client := redpen.NewGhClient(token)
 		prAuthorFilter := redpen.SplitSet(prAuthor)
-		commentFilter := redpen.SplitSet(commentFilterStr)
+		filterOpts := redpen.FilterOptions{
+			Reviewers:     redpen.SplitSet(commentFilterStr),
+			ReviewerTypes: redpen.SplitSetLower(reviewerTypeStr),
+		}
 
 		// Log available rate limit budget before any API calls.
 		if rl, err := redpen.FetchRateLimit(client); err != nil {
@@ -163,19 +168,29 @@ var fetchCmd = &cobra.Command{
 			Repo:        repo,
 			GeneratedAt: time.Now().UTC(),
 			Config: redpen.OutputConfig{
-				PRAuthorFilter: prAuthor,
-				CommentFilter:  commentFilterStr,
+				PRAuthorFilter:     prAuthor,
+				CommentFilter:      commentFilterStr,
+				ReviewerTypeFilter: reviewerTypeStr,
+				SkipEmpty:          skipEmpty,
 			},
 		}
 
+		skipped := 0
 		for _, pr := range prDataList {
-			filtered := redpen.ApplyCommentFilter(pr, commentFilter)
+			filtered := redpen.ApplyFilters(pr, filterOpts)
+			if skipEmpty && !redpen.HasAnyComments(filtered) {
+				skipped++
+				continue
+			}
 			output.PullRequests = append(output.PullRequests, filtered)
 			output.Stats.TotalReviewComments += len(filtered.ReviewComments)
 			output.Stats.TotalReviews += len(filtered.Reviews)
 			output.Stats.TotalIssueComments += len(filtered.IssueComments)
 		}
 		output.Stats.TotalPRs = len(output.PullRequests)
+		if skipped > 0 {
+			log.Info().Int("skipped", skipped).Msg("PRs skipped (no matching comments)")
+		}
 
 		jsonPath := filepath.Join(outDir, "comments.json")
 		jsonBytes, err := json.MarshalIndent(output, "", "  ")
@@ -223,7 +238,9 @@ func init() {
 	fetchCmd.Flags().String("token", os.Getenv("GITHUB_TOKEN"), "GitHub token")
 	fetchCmd.Flags().String("repo", "", "GitHub repository (owner/repo)")
 	fetchCmd.Flags().String("pr-author", "", "Filter by PR author (comma-separated)")
-	fetchCmd.Flags().String("comment-filter", "", "Filter comments by reviewer (comma-separated)")
+	fetchCmd.Flags().String("comment-filter", "", "Filter comments by reviewer login (comma-separated)")
+	fetchCmd.Flags().String("reviewer-type", "", "Filter comments by author type: user, bot, organization (comma-separated)")
+	fetchCmd.Flags().Bool("skip-empty", false, "Skip PRs with no matching comments after all filters")
 	fetchCmd.Flags().String("state", "all", "PR state (open, closed, all)")
 	fetchCmd.Flags().String("out", "./pr-reviews", "Output directory")
 	fetchCmd.Flags().Int("limit", 0, "Limit number of PRs to fetch (0 = unlimited)")
@@ -232,6 +249,8 @@ func init() {
 	mustBindPFlag("repo", fetchCmd.Flags().Lookup("repo"))
 	mustBindPFlag("pr-author", fetchCmd.Flags().Lookup("pr-author"))
 	mustBindPFlag("comment-filter", fetchCmd.Flags().Lookup("comment-filter"))
+	mustBindPFlag("reviewer-type", fetchCmd.Flags().Lookup("reviewer-type"))
+	mustBindPFlag("skip-empty", fetchCmd.Flags().Lookup("skip-empty"))
 	mustBindPFlag("state", fetchCmd.Flags().Lookup("state"))
 	mustBindPFlag("out", fetchCmd.Flags().Lookup("out"))
 	mustBindPFlag("limit", fetchCmd.Flags().Lookup("limit"))

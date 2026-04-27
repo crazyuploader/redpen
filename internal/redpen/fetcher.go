@@ -255,31 +255,65 @@ func SplitSet(s string) map[string]bool {
 	return m
 }
 
-// ApplyCommentFilter returns a copy of PRData with comments filtered by reviewer.
-func ApplyCommentFilter(pr PRData, commentFilter map[string]bool) PRData {
-	if len(commentFilter) == 0 {
-		return pr
+// SplitSetLower is like SplitSet but lowercases all values (for case-insensitive matching).
+func SplitSetLower(s string) map[string]bool {
+	m := make(map[string]bool)
+	for _, v := range strings.Split(s, ",") {
+		if t := strings.TrimSpace(v); t != "" {
+			m[strings.ToLower(t)] = true
+		}
 	}
+	return m
+}
+
+// FilterOptions controls which comments survive ApplyFilters.
+type FilterOptions struct {
+	// Reviewers keeps only comments from these logins (empty = keep all).
+	Reviewers map[string]bool
+	// ReviewerTypes keeps only comments whose author type matches (case-insensitive).
+	// GitHub values: "user", "bot", "organization".
+	ReviewerTypes map[string]bool
+}
+
+// ApplyFilters returns a copy of PRData with only comments that pass all filters.
+func ApplyFilters(pr PRData, opts FilterOptions) PRData {
 	filtered := pr
+
 	filtered.ReviewComments = nil
 	for _, c := range pr.ReviewComments {
-		if commentFilter[c.Reviewer] {
+		if matchReviewer(opts.Reviewers, c.Reviewer) && matchType(opts.ReviewerTypes, c.ReviewerType) {
 			filtered.ReviewComments = append(filtered.ReviewComments, c)
 		}
 	}
+
 	filtered.Reviews = nil
 	for _, r := range pr.Reviews {
-		if commentFilter[r.Reviewer] {
+		if matchReviewer(opts.Reviewers, r.Reviewer) && matchType(opts.ReviewerTypes, r.ReviewerType) {
 			filtered.Reviews = append(filtered.Reviews, r)
 		}
 	}
+
 	filtered.IssueComments = nil
 	for _, c := range pr.IssueComments {
-		if commentFilter[c.Author] {
+		if matchReviewer(opts.Reviewers, c.Author) && matchType(opts.ReviewerTypes, c.AuthorType) {
 			filtered.IssueComments = append(filtered.IssueComments, c)
 		}
 	}
+
 	return filtered
+}
+
+// HasAnyComments reports whether pr has at least one comment of any kind.
+func HasAnyComments(pr PRData) bool {
+	return len(pr.ReviewComments)+len(pr.Reviews)+len(pr.IssueComments) > 0
+}
+
+func matchReviewer(filter map[string]bool, login string) bool {
+	return len(filter) == 0 || filter[login]
+}
+
+func matchType(filter map[string]bool, typ string) bool {
+	return len(filter) == 0 || filter[strings.ToLower(typ)]
 }
 
 func LoadState(path string) State {

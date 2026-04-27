@@ -20,8 +20,12 @@ make build
 # Fetch PRs by a specific author (uses GitHub Search API — no full repo enumeration)
 redpen fetch --repo owner/repo --pr-author username --token $GITHUB_TOKEN
 
-# Filter output comments by reviewer
-redpen fetch --repo owner/repo --pr-author username --comment-filter reviewer1,reviewer2
+# Filter comments to a specific reviewer, skip PRs with no matching comments
+redpen fetch --repo owner/repo --pr-author username \
+  --comment-filter reviewer1,reviewer2 --skip-empty
+
+# Only human reviewer comments (exclude bots)
+redpen fetch --repo owner/repo --reviewer-type user --skip-empty
 
 # Re-fetch everything, ignoring cache
 redpen fetch --repo owner/repo --force
@@ -36,8 +40,10 @@ redpen fetch --repo owner/repo --limit 50
 |---|---|---|
 | `--repo` | required | `owner/repo` |
 | `--token` | `$GITHUB_TOKEN` | GitHub PAT |
-| `--pr-author` | all | Comma-separated PR authors |
-| `--comment-filter` | all | Comma-separated reviewers to filter comments |
+| `--pr-author` | all | Comma-separated PR author logins |
+| `--comment-filter` | all | Keep only comments from these reviewer logins |
+| `--reviewer-type` | all | Keep only comments by type: `user`, `bot`, `organization` |
+| `--skip-empty` | false | Skip PRs with zero matching comments after all filters |
 | `--state` | `all` | `open`, `closed`, `all` |
 | `--out` | `./pr-reviews` | Output directory |
 | `--limit` | `0` (unlimited) | Max PRs to process |
