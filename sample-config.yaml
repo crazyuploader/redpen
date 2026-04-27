@@ -1,43 +1,43 @@
 # Redpen Configuration Sample
-# Copy to config.yaml and fill in your details (config.yaml is gitignored)
+# Copy to config.yaml and fill in values (config.yaml is gitignored)
 
-# GitHub PAT — can also be set via GITHUB_TOKEN env var
+# GitHub PAT. Also settable via GITHUB_TOKEN env var.
 token: "ghp_xxxxxxxxxxxx"
 
 # Repository to fetch from (owner/repo)
 repo: "owner/repo"
 
-# Default output directory
+# Output directory
 out: "./pr-reviews"
 
-# Number of parallel PR fetches
+# Parallel PR fetches
 parallelism: 4
 
-# PR state to fetch (open, closed, all)
+# PR state: open, closed, all
 state: "all"
 
-# Log level (debug, info, warn, error)
+# Log level: debug, info, warn, error
 log-level: "info"
 
-# Filter by PR author login (comma-separated). Uses GitHub Search API — no full
-# repo enumeration. Much faster and cheaper on rate limit than fetching all PRs.
+# PR author logins to fetch (comma-separated). Queries GitHub Search API per
+# author — no full repo enumeration, far fewer API calls.
 # pr-author: "user1,user2"
 
-# Filter comments by reviewer login (comma-separated). Applied to inline review
+# Reviewer logins to keep comments from (comma-separated). Covers inline review
 # comments, overall reviews, and discussion comments.
 # comment-filter: "reviewer1,reviewer2"
 
-# Filter comments by author type (comma-separated, case-insensitive).
+# Reviewer types to keep (comma-separated, case-insensitive).
 # GitHub values: user, bot, organization
-# Useful for excluding bot noise or focusing only on human reviewers.
+# Set "user" to drop bot noise and keep only human reviewers.
 # reviewer-type: "user"
 
-# Skip PRs that have zero matching comments after all filters are applied.
-# Avoids cluttering output with PRs that had no relevant feedback.
+# Drop PRs with zero matching comments after all filters run.
+# Keeps output tight when comment-filter or reviewer-type is narrow.
 # skip-empty: true
 
 # Max PRs to process (0 = no limit)
 # limit: 10
 
-# Ignore cache and re-fetch everything from the API
+# Ignore cache, re-fetch all PRs from GitHub
 # force: false

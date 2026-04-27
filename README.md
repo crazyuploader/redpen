@@ -17,20 +17,20 @@ make build
 ## Usage
 
 ```sh
-# Fetch PRs by a specific author (uses GitHub Search API — no full repo enumeration)
+# Fetch one author's PRs via Search API (no full repo enumeration)
 redpen fetch --repo owner/repo --pr-author username --token $GITHUB_TOKEN
 
-# Filter comments to a specific reviewer, skip PRs with no matching comments
+# Keep only comments from specific reviewers; drop PRs with no matches
 redpen fetch --repo owner/repo --pr-author username \
   --comment-filter reviewer1,reviewer2 --skip-empty
 
-# Only human reviewer comments (exclude bots)
+# Human reviewer comments only, no bots
 redpen fetch --repo owner/repo --reviewer-type user --skip-empty
 
-# Re-fetch everything, ignoring cache
+# Ignore cache, re-fetch everything
 redpen fetch --repo owner/repo --force
 
-# Limit to 50 PRs
+# Cap at 50 PRs
 redpen fetch --repo owner/repo --limit 50
 ```
 
@@ -40,10 +40,10 @@ redpen fetch --repo owner/repo --limit 50
 |---|---|---|
 | `--repo` | required | `owner/repo` |
 | `--token` | `$GITHUB_TOKEN` | GitHub PAT |
-| `--pr-author` | all | Comma-separated PR author logins |
-| `--comment-filter` | all | Keep only comments from these reviewer logins |
-| `--reviewer-type` | all | Keep only comments by type: `user`, `bot`, `organization` |
-| `--skip-empty` | false | Skip PRs with zero matching comments after all filters |
+| `--pr-author` | all | PR author logins, comma-separated |
+| `--comment-filter` | all | Keep comments from these reviewer logins only |
+| `--reviewer-type` | all | Keep comments by type: `user`, `bot`, `organization` |
+| `--skip-empty` | false | Drop PRs with zero matching comments after filtering |
 | `--state` | `all` | `open`, `closed`, `all` |
 | `--out` | `./pr-reviews` | Output directory |
 | `--limit` | `0` (unlimited) | Max PRs to process |
@@ -54,11 +54,13 @@ redpen fetch --repo owner/repo --limit 50
 ## Config file
 
 ```yaml
-# config.yaml  (never commit this — it's in .gitignore)
+# config.yaml  (gitignored — never commit this)
 token: ghp_...
 repo: owner/repo
 pr-author: username
 ```
+
+Copy `sample-config.yaml` to get started.
 
 ## Output
 
