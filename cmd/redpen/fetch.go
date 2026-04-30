@@ -208,6 +208,12 @@ var fetchCmd = &cobra.Command{
 		}
 		log.Info().Str("path", mdPath).Msg("markdown written")
 
+		htmlPath := filepath.Join(outDir, "report.html")
+		if err := os.WriteFile(htmlPath, []byte(redpen.GenerateHTML(output)), 0o644); err != nil {
+			return fmt.Errorf("write html: %w", err)
+		}
+		log.Info().Str("path", htmlPath).Msg("html written")
+
 		state.LastRun = time.Now().UTC()
 		if err := redpen.SaveState(statePath, state); err != nil {
 			log.Warn().Err(err).Msg("failed to save state")

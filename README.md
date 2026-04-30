@@ -68,9 +68,18 @@ Copy `sample-config.yaml` to get started.
 pr-reviews/
   comments.json       # structured PR + comment data
   dont-do-list.md     # human-readable review guide
+  report.html         # interactive HTML report (searchable, filterable)
   .state.json         # fetch cache state
   cache/              # per-PR JSON cache
 ```
+
+The HTML report (`report.html`) includes:
+
+- Searchable comments (filter by typing)
+- Clickable table of contents for quick navigation
+- Syntax-highlighted code context
+- Inline suggestions displayed prominently
+- Responsive design
 
 ## Development
 
