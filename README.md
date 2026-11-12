@@ -39,7 +39,7 @@ redpen fetch --repo owner/repo --limit 50
 | Flag               | Default         | Description                                          |
 | ------------------ | --------------- | ---------------------------------------------------- |
 | `--repo`           | required        | `owner/repo`                                         |
-| `--token`          | `$GITHUB_TOKEN` | GitHub PAT                                           |
+| `--token`          | `$GITHUB_TOKEN` | Falls back to `gh auth token` if unset               |
 | `--pr-author`      | all             | PR author logins, comma-separated                    |
 | `--comment-filter` | all             | Keep comments from these reviewer logins only        |
 | `--reviewer-type`  | all             | Keep comments by type: `user`, `bot`, `organization` |

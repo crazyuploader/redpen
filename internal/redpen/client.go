@@ -74,6 +74,12 @@ func (c *GhClient) get(url string) (body []byte, linkHeader string, err error) {
 				Str("url", url).
 				Msg("rate limited, waiting")
 			time.Sleep(wait)
+		case fasthttp.StatusUnauthorized, fasthttp.StatusNotFound, fasthttp.StatusUnprocessableEntity:
+			hint := ""
+			if c.Token != "" {
+				hint = " (hint: token may lack access to this repo; remove the configured token to fall back to `gh auth token`)"
+			}
+			return nil, "", fmt.Errorf("HTTP %d %s: %.200s%s", sc, url, b, hint)
 		default:
 			return nil, "", fmt.Errorf("HTTP %d %s: %.200s", sc, url, b)
 		}

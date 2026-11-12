@@ -3,6 +3,7 @@ package main
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"os"
 	"os/signal"
@@ -50,6 +51,19 @@ var fetchCmd = &cobra.Command{
 
 		if err := os.MkdirAll(outDir, 0o755); err != nil {
 			return fmt.Errorf("cannot create output dir %s: %w", outDir, err)
+		}
+
+		// Explicit token (flag, env, config) wins. With none set, fall back to
+		// the gh CLI's token when gh is installed.
+		if token == "" {
+			if t, err := redpen.GhCLIToken(); errors.Is(err, redpen.ErrGhNotInstalled) {
+				log.Debug().Msg("gh CLI not installed, using unauthenticated requests")
+			} else if err != nil {
+				log.Warn().Err(err).Msg("gh CLI token unavailable, using unauthenticated requests")
+			} else {
+				token = t
+				log.Info().Msg("no token configured, using token from `gh auth token`")
+			}
 		}
 
 		statePath := filepath.Join(outDir, ".state.json")
@@ -241,7 +255,7 @@ func mapKeys(m map[string]bool) []string {
 }
 
 func init() {
-	fetchCmd.Flags().String("token", os.Getenv("GITHUB_TOKEN"), "GitHub token")
+	fetchCmd.Flags().String("token", os.Getenv("GITHUB_TOKEN"), "GitHub token (default: $GITHUB_TOKEN, then `gh auth token` if gh is installed)")
 	fetchCmd.Flags().String("repo", "", "GitHub repository (owner/repo)")
 	fetchCmd.Flags().String("pr-author", "", "Filter by PR author (comma-separated)")
 	fetchCmd.Flags().String("comment-filter", "", "Filter comments by reviewer login (comma-separated)")
