@@ -255,7 +255,7 @@ func mapKeys(m map[string]bool) []string {
 }
 
 func init() {
-	fetchCmd.Flags().String("token", os.Getenv("GITHUB_TOKEN"), "GitHub token (default: $GITHUB_TOKEN, then `gh auth token` if gh is installed)")
+	fetchCmd.Flags().String("token", "", "GitHub token (env: GITHUB_TOKEN or REDPEN_TOKEN; then gh auth token if gh is installed)")
 	fetchCmd.Flags().String("repo", "", "GitHub repository (owner/repo)")
 	fetchCmd.Flags().String("pr-author", "", "Filter by PR author (comma-separated)")
 	fetchCmd.Flags().String("comment-filter", "", "Filter comments by reviewer login (comma-separated)")
@@ -266,6 +266,9 @@ func init() {
 	fetchCmd.Flags().Int("limit", 0, "Limit number of PRs to fetch (0 = unlimited)")
 
 	mustBindPFlag("token", fetchCmd.Flags().Lookup("token"))
+	if err := viper.BindEnv("token", "REDPEN_TOKEN", "GITHUB_TOKEN"); err != nil {
+		panic(fmt.Sprintf("viper.BindEnv(token): %v", err))
+	}
 	mustBindPFlag("repo", fetchCmd.Flags().Lookup("repo"))
 	mustBindPFlag("pr-author", fetchCmd.Flags().Lookup("pr-author"))
 	mustBindPFlag("comment-filter", fetchCmd.Flags().Lookup("comment-filter"))

@@ -1,6 +1,7 @@
 package redpen
 
 import (
+	"bytes"
 	"encoding/json"
 	"fmt"
 	"regexp"
@@ -66,6 +67,10 @@ func (c *GhClient) get(url string) (body []byte, linkHeader string, err error) {
 		case fasthttp.StatusOK:
 			return b, link, nil
 		case fasthttp.StatusTooManyRequests, fasthttp.StatusForbidden:
+			if sc == fasthttp.StatusForbidden && !isRateLimited(resp, b) {
+				// Plain permission denial: retrying will not help.
+				return nil, "", fmt.Errorf("HTTP %d %s: %.200s", sc, url, b)
+			}
 			wait := rateLimitBackoff(resp)
 			log.Warn().
 				Int("attempt", attempt+1).
@@ -85,6 +90,18 @@ func (c *GhClient) get(url string) (body []byte, linkHeader string, err error) {
 		}
 	}
 	return nil, "", fmt.Errorf("exceeded %d retries: %s", maxRetries, url)
+}
+
+// isRateLimited reports whether a 403 is a primary or secondary rate limit
+// rather than a permission error.
+func isRateLimited(resp *fasthttp.Response, body []byte) bool {
+	if string(resp.Header.Peek("X-RateLimit-Remaining")) == "0" {
+		return true
+	}
+	if len(resp.Header.Peek("Retry-After")) > 0 {
+		return true
+	}
+	return bytes.Contains(bytes.ToLower(body), []byte("rate limit"))
 }
 
 func rateLimitBackoff(resp *fasthttp.Response) time.Duration {

@@ -215,9 +215,10 @@ func FetchPRData(c *GhClient, owner, repo string, pr RawPR) (PRData, error) {
 		FetchedAt:  time.Now().UTC(),
 	}
 
+	// Any failed sub-fetch aborts the PR so the caller never caches partial data.
 	rawComments, err := listReviewComments(c, owner, repo, pr.Number)
 	if err != nil {
-		log.Warn().Err(err).Int("pr", pr.Number).Msg("review comments fetch failed")
+		return PRData{}, fmt.Errorf("review comments for PR #%d: %w", pr.Number, err)
 	}
 	for _, rc := range rawComments {
 		data.ReviewComments = append(data.ReviewComments, toReviewComment(rc))
@@ -225,7 +226,7 @@ func FetchPRData(c *GhClient, owner, repo string, pr RawPR) (PRData, error) {
 
 	rawReviews, err := listReviews(c, owner, repo, pr.Number)
 	if err != nil {
-		log.Warn().Err(err).Int("pr", pr.Number).Msg("reviews fetch failed")
+		return PRData{}, fmt.Errorf("reviews for PR #%d: %w", pr.Number, err)
 	}
 	for _, r := range rawReviews {
 		if rv, ok := toReview(r); ok {
@@ -235,7 +236,7 @@ func FetchPRData(c *GhClient, owner, repo string, pr RawPR) (PRData, error) {
 
 	rawIssue, err := listIssueComments(c, owner, repo, pr.Number)
 	if err != nil {
-		log.Warn().Err(err).Int("pr", pr.Number).Msg("issue comments fetch failed")
+		return PRData{}, fmt.Errorf("issue comments for PR #%d: %w", pr.Number, err)
 	}
 	for _, ic := range rawIssue {
 		data.IssueComments = append(data.IssueComments, toIssueComment(ic))
